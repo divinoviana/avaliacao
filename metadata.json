@@ -1,5 +1,5 @@
 {
-  "name": "Veritas Assessment",
+  "name": "Sistema de Avaliação",
   "description": "A high-integrity evaluation platform for humanities featuring anti-cheat window tracking and AI-driven oral examinations.",
   "requestFramePermissions": [
     "microphone"

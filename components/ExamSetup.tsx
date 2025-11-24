@@ -14,8 +14,9 @@ export const ExamSetup: React.FC<Props> = ({ onStart, onTeacherLogin }) => {
   const [subject, setSubject] = useState<Subject>('História');
   const [bimester, setBimester] = useState<Bimester>('1º Bimestre');
   const [mode, setMode] = useState<ExamMode>(ExamMode.WRITTEN);
-  // Default changed to 'Pré-Vestibular' (ENEM Standard)
-  const [difficulty, setDifficulty] = useState<'Ensino Médio' | 'Pré-Vestibular' | 'Nível Superior'>('Pré-Vestibular');
+  
+  // Dificuldade fixa
+  const difficulty = 'Pré-Vestibular';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,7 +48,7 @@ export const ExamSetup: React.FC<Props> = ({ onStart, onTeacherLogin }) => {
         </button>
       </div>
 
-      <div className="bg-slate-900 p-8 text-white">
+      <div className="bg-slate-900 p-8 text-white text-center">
         <h2 className="text-2xl serif font-bold">ESCOLA ESTADUAL FREDERICO JOSÉ PEDREIRA NETO</h2>
         <p className="opacity-80 mt-2">Sistema de Avaliação de Ciências Humanas e Sociais Aplicadas</p>
       </div>
@@ -109,18 +110,11 @@ export const ExamSetup: React.FC<Props> = ({ onStart, onTeacherLogin }) => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-           {/* Level selection could be hidden if locked by teacher, but keeping flexible for now */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Nível de Dificuldade</label>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value as any)}
-              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-            >
-              <option value="Pré-Vestibular">Padrão ENEM / Pré-Vestibular</option>
-              <option value="Ensino Médio">Ensino Médio (Básico)</option>
-              <option value="Nível Superior">Nível Superior</option>
-            </select>
+            <div className="w-full px-4 py-3 border border-slate-200 bg-slate-100 rounded-lg text-slate-600 font-medium text-center">
+               Padrão ENEM / Pré-Vestibular
+            </div>
           </div>
           
           <div>
