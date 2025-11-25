@@ -14,26 +14,35 @@ export const ExamSetup: React.FC<Props> = ({ onStart, onTeacherLogin }) => {
   const [subject, setSubject] = useState<Subject>('História');
   const [bimester, setBimester] = useState<Bimester>('1º Bimestre');
   const [mode, setMode] = useState<ExamMode>(ExamMode.WRITTEN);
+  const [loading, setLoading] = useState(false);
   
   // Dificuldade fixa
   const difficulty = 'Pré-Vestibular';
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (studentName && studentClass) {
-      // Check if teacher has defined specific topics for this selection
-      const teacherConfig = getSpecificConfig(subject, bimester);
-      const topics = teacherConfig?.topics;
+      setLoading(true);
+      try {
+        // Fetch specific topics from DB
+        const teacherConfig = await getSpecificConfig(subject, bimester);
+        const topics = teacherConfig?.topics;
 
-      onStart({ 
-        studentName, 
-        studentClass,
-        subject, 
-        bimester, 
-        mode, 
-        difficulty,
-        topics // Pass topics to the exam engine
-      });
+        onStart({ 
+          studentName, 
+          studentClass,
+          subject, 
+          bimester, 
+          mode, 
+          difficulty,
+          topics 
+        });
+      } catch (err) {
+        console.error("Error loading config", err);
+        alert("Erro ao carregar configurações da prova. Tente novamente.");
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -210,10 +219,23 @@ export const ExamSetup: React.FC<Props> = ({ onStart, onTeacherLogin }) => {
             <div className="pt-2">
               <button
                 type="submit"
-                className="w-full bg-gradient-to-r from-indigo-600 to-indigo-800 hover:from-indigo-700 hover:to-indigo-900 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-indigo-200 transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2"
+                disabled={loading}
+                className="w-full bg-gradient-to-r from-indigo-600 to-indigo-800 hover:from-indigo-700 hover:to-indigo-900 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-indigo-200 transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                <span>Acessar Avaliação</span>
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                {loading ? (
+                  <>
+                     <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                     </svg>
+                     <span>Carregando Sistema...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Acessar Avaliação</span>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                  </>
+                )}
               </button>
               
               <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">

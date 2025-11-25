@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ExamSetup } from './components/ExamSetup';
 import { WrittenExam } from './components/WrittenExam';
@@ -9,10 +10,11 @@ import { initializeAuth } from './services/storageService';
 function App() {
   const [examConfig, setExamConfig] = useState<ExamConfig | null>(null);
   const [isTeacherMode, setIsTeacherMode] = useState(false);
+  const [initDone, setInitDone] = useState(false);
 
   useEffect(() => {
     // Ensure default admin exists on app load
-    initializeAuth();
+    initializeAuth().then(() => setInitDone(true));
   }, []);
 
   const handleStart = (config: ExamConfig) => {
@@ -22,6 +24,14 @@ function App() {
   const handleFinish = () => {
     setExamConfig(null);
   };
+
+  if (!initDone) {
+      return (
+          <div className="flex h-screen items-center justify-center bg-slate-100">
+              <div className="text-indigo-900 font-bold animate-pulse">Conectando ao Sistema Escolar...</div>
+          </div>
+      );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 pb-10 font-sans">

@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { authenticateUser, saveTeacherConfig, getStudentResults, getTeacherConfigs, getUsers, saveUser, deleteUser, updateUserPassword, exportDatabase, importDatabase } from '../services/storageService';
+import { authenticateUser, saveTeacherConfig, getStudentResults, getTeacherConfigs, getUsers, saveUser, deleteUser, updateUserPassword, exportDatabase, importDatabase, isSystemOffline } from '../services/storageService';
 import { Subject, Bimester, StudentResult, User, UserRole } from '../types';
 
 interface Props {
@@ -12,6 +13,8 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [authError, setAuthError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   // Dashboard Tab State
   const [activeTab, setActiveTab] = useState<'config' | 'results' | 'users' | 'profile'>('config');
@@ -42,62 +45,90 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
   // Backup State
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Load Initial Data when tabs change or user logs in
   useEffect(() => {
     if (currentUser) {
-        // Load existing config
-        const configs = getTeacherConfigs();
-        const current = configs.find(c => c.subject === subject && c.bimester === bimester);
-        if (current) setTopics(current.topics);
-        else setTopics('');
+        setIsLoading(true);
+        // Check connectivity status
+        setIsOffline(isSystemOffline());
 
-        // Load results
-        const allResults = getStudentResults();
-        setResults(allResults);
+        const fetchData = async () => {
+            try {
+                // Load existing config
+                const configs = await getTeacherConfigs();
+                const current = configs.find(c => c.subject === subject && c.bimester === bimester);
+                if (current) setTopics(current.topics);
+                else setTopics('');
 
-        // Extract unique classes for filter
-        const classes = Array.from(new Set(allResults.map(r => r.studentClass || 'N/A').filter(c => c !== 'N/A'))).sort();
-        setUniqueClasses(classes);
+                // Load results
+                const allResults = await getStudentResults();
+                setResults(allResults);
 
-        // Load users if Director
-        if (currentUser.role === 'DIRECTOR') {
-            setUsersList(getUsers());
-        }
+                // Extract unique classes for filter
+                const classes = Array.from(new Set(allResults.map(r => r.studentClass || 'N/A').filter(c => c !== 'N/A'))).sort();
+                setUniqueClasses(classes);
+
+                // Load users if Director
+                if (currentUser.role === 'DIRECTOR') {
+                    const u = await getUsers();
+                    setUsersList(u);
+                }
+            } catch (err) {
+                console.error("Failed to load dashboard data", err);
+            } finally {
+                setIsLoading(false);
+                // Recheck offline status after operations
+                setIsOffline(isSystemOffline());
+            }
+        };
+        fetchData();
     }
   }, [currentUser, subject, bimester, activeTab]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = authenticateUser(loginUser, loginPass);
-    if (user) {
-      setCurrentUser(user);
-      setAuthError('');
-    } else {
-      setAuthError("Usuário ou senha incorretos.");
+    setIsLoading(true);
+    try {
+        const user = await authenticateUser(loginUser, loginPass);
+        if (user) {
+          setCurrentUser(user);
+          setAuthError('');
+        } else {
+          setAuthError("Usuário ou senha incorretos.");
+        }
+    } catch (e) {
+        setAuthError("Erro na conexão com servidor.");
+    } finally {
+        setIsLoading(false);
     }
   };
 
-  const handleSaveConfig = () => {
-    saveTeacherConfig({
+  const handleSaveConfig = async () => {
+    setIsLoading(true);
+    await saveTeacherConfig({
       subject,
       bimester,
       topics,
       isActive: true,
       lastModifiedBy: currentUser?.username
     });
-    setSaveMessage('Conteúdo da prova atualizado com sucesso!');
+    setIsLoading(false);
+    setIsOffline(isSystemOffline());
+    setSaveMessage(isSystemOffline() ? 'Salvo localmente (Offline).' : 'Conteúdo sincronizado na Nuvem!');
     setTimeout(() => setSaveMessage(''), 3000);
   };
 
-  const handleCreateUser = (e: React.FormEvent) => {
+  const handleCreateUser = async (e: React.FormEvent) => {
       e.preventDefault();
       try {
-          saveUser({
+          await saveUser({
               name: newUser.name,
               username: newUser.username,
               password: newUser.password,
               role: newUser.role
           });
-          setUsersList(getUsers());
+          const updatedUsers = await getUsers();
+          setUsersList(updatedUsers);
           setNewUser({ name: '', username: '', password: '', role: 'TEACHER' });
           setUserMsg('Usuário cadastrado com sucesso!');
       } catch (err: any) {
@@ -106,18 +137,19 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
       setTimeout(() => setUserMsg(''), 3000);
   };
 
-  const handleDeleteUser = (username: string) => {
+  const handleDeleteUser = async (username: string) => {
       if(window.confirm(`Tem certeza que deseja remover ${username}?`)) {
           try {
-              deleteUser(username);
-              setUsersList(getUsers());
+              await deleteUser(username);
+              const updatedUsers = await getUsers();
+              setUsersList(updatedUsers);
           } catch (err: any) {
               alert(err.message);
           }
       }
   };
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
       e.preventDefault();
       setPwdMsg({ text: '', type: 'error' });
 
@@ -133,7 +165,7 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
 
       try {
           if (currentUser) {
-            updateUserPassword(currentUser.username, pwdData.current, pwdData.new);
+            await updateUserPassword(currentUser.username, pwdData.current, pwdData.new);
             setPwdMsg({ text: 'Senha alterada com sucesso!', type: 'success' });
             setPwdData({ current: '', new: '', confirm: '' });
           }
@@ -142,8 +174,8 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
       }
   };
 
-  const handleExportData = () => {
-      const json = exportDatabase();
+  const handleExportData = async () => {
+      const json = await exportDatabase();
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -159,9 +191,9 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
           const content = event.target?.result as string;
-          if (importDatabase(content)) {
+          if (await importDatabase(content)) {
               alert("Dados restaurados com sucesso! O sistema será recarregado.");
               window.location.reload();
           } else {
@@ -176,7 +208,6 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
     .filter(r => filterClass === 'Todas' || r.studentClass === filterClass)
     .filter(r => filterSubject === 'Todas' || r.subject === filterSubject)
     .sort((a, b) => {
-       // Sort by Class then Name
        if (a.studentClass < b.studentClass) return -1;
        if (a.studentClass > b.studentClass) return 1;
        return a.studentName.localeCompare(b.studentName);
@@ -214,8 +245,8 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
               </div>
               {authError && <p className="text-red-500 text-sm text-center">{authError}</p>}
               
-              <button type="submit" className="w-full bg-indigo-900 text-white py-3 rounded font-bold hover:bg-indigo-800 transition">
-                Entrar no Sistema
+              <button type="submit" disabled={isLoading} className="w-full bg-indigo-900 text-white py-3 rounded font-bold hover:bg-indigo-800 transition disabled:opacity-50">
+                {isLoading ? 'Conectando...' : 'Entrar no Sistema'}
               </button>
            </form>
            
@@ -233,14 +264,20 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
 
   return (
     <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden min-h-[600px]">
-      <div className="bg-indigo-900 text-white p-6 flex justify-between items-center">
+      <div className="bg-indigo-900 text-white p-6 flex justify-between items-center flex-wrap gap-4">
          <div>
            <h2 className="text-2xl font-serif font-bold">Painel Administrativo</h2>
            <p className="opacity-80 text-sm">Olá, {currentUser.name} ({currentUser.role === 'DIRECTOR' ? 'Diretor' : 'Professor'})</p>
          </div>
-         <button onClick={() => setCurrentUser(null)} className="text-sm bg-indigo-800 hover:bg-indigo-700 px-4 py-2 rounded transition">
-            Sair
-         </button>
+         <div className="flex items-center gap-3">
+             <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 ${isOffline ? 'bg-amber-400 text-amber-900' : 'bg-emerald-400 text-emerald-900'}`}>
+                <span className={`w-2 h-2 rounded-full ${isOffline ? 'bg-amber-800' : 'bg-emerald-800 animate-pulse'}`}></span>
+                {isOffline ? 'OFFLINE (Local)' : 'ONLINE (Nuvem)'}
+             </div>
+             <button onClick={() => setCurrentUser(null)} className="text-sm bg-indigo-800 hover:bg-indigo-700 px-4 py-2 rounded transition">
+                Sair
+             </button>
+         </div>
       </div>
 
       <div className="flex border-b border-slate-200 overflow-x-auto">
@@ -273,6 +310,21 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
       </div>
 
       <div className="p-8">
+        {isLoading && <p className="text-center text-indigo-600 mb-4 animate-pulse">Sincronizando com a nuvem...</p>}
+        
+        {isOffline && (
+            <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-lg flex items-start gap-3">
+               <svg className="w-5 h-5 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+               <div>
+                 <p className="text-sm font-bold text-amber-800">Modo Offline Ativado</p>
+                 <p className="text-xs text-amber-700 mt-1">
+                   Não foi possível conectar ao banco de dados do Google. Os dados estão sendo salvos apenas <strong>neste computador</strong>. 
+                   Para corrigir, acesse o Console do Firebase e crie o Firestore Database.
+                 </p>
+               </div>
+            </div>
+        )}
+
         {activeTab === 'config' && (
           <div className="space-y-6 max-w-3xl mx-auto">
              <div className="bg-amber-50 border-l-4 border-amber-500 p-4 text-amber-900 text-sm">
@@ -321,7 +373,8 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
 
              <button 
                onClick={handleSaveConfig}
-               className="bg-green-600 text-white px-6 py-3 rounded hover:bg-green-700 font-bold w-full md:w-auto shadow-sm"
+               disabled={isLoading}
+               className="bg-green-600 text-white px-6 py-3 rounded hover:bg-green-700 font-bold w-full md:w-auto shadow-sm disabled:opacity-50"
              >
                Salvar Conteúdo da Prova
              </button>
@@ -499,8 +552,8 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
                             </select>
                         </div>
                         
-                        <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded font-bold text-sm shadow">
-                            Cadastrar
+                        <button type="submit" disabled={isLoading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded font-bold text-sm shadow disabled:opacity-50">
+                            {isLoading ? 'Salvando...' : 'Cadastrar'}
                         </button>
                         {userMsg && <p className="text-center text-xs text-green-600 font-bold mt-2">{userMsg}</p>}
                      </form>

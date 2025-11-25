@@ -72,8 +72,6 @@ export const WrittenExam: React.FC<Props> = ({ config, onFinish }) => {
     setViolations(updated);
 
     if (updated.length >= 3) {
-      // Auto-submit with zero grade or just terminate? 
-      // User said "resetaria ou zerava". Let's terminate with 0.
       finishExam(0, true);
     }
   }, [status]);
@@ -117,33 +115,34 @@ export const WrittenExam: React.FC<Props> = ({ config, onFinish }) => {
 
   // Helper to find the correct text string given the mix
   const rawOriginalOption = (q: Question, map: number[]) => {
-      // q.options is currently shuffled. 
-      // We know q.correctIndex is the index in the ORIGINAL list.
-      // We need to find which visual index points to q.correctIndex
       // map[visualIndex] = originalIndex. 
-      // Find visualIndex where map[visualIndex] === q.correctIndex
       const visualIndex = map.indexOf(q.correctIndex);
       return q.options[visualIndex];
   };
 
-  const finishExam = (forcedScore?: number, terminated: boolean = false) => {
+  const finishExam = async (forcedScore?: number, terminated: boolean = false) => {
       const finalResult = calculateScore();
       const score = forcedScore !== undefined ? forcedScore : finalResult.score;
       
       setResult({ score, details: finalResult.details });
       setStatus(terminated ? ExamStatus.TERMINATED : ExamStatus.COMPLETED);
 
-      // Save to "Database"
-      saveStudentResult({
-        id: Date.now().toString(),
-        studentName: config.studentName,
-        studentClass: config.studentClass, // NEW FIELD
-        subject: config.subject,
-        bimester: config.bimester,
-        score: score,
-        date: new Date().toISOString(),
-        violations: violationsRef.current.length
-      });
+      // Save to "Database" (Async)
+      try {
+        await saveStudentResult({
+          id: Date.now().toString(),
+          studentName: config.studentName,
+          studentClass: config.studentClass,
+          subject: config.subject,
+          bimester: config.bimester,
+          score: score,
+          date: new Date().toISOString(),
+          violations: violationsRef.current.length
+        });
+      } catch (err) {
+        console.error("Failed to save result", err);
+        alert("Atenção: Houve um erro ao salvar sua nota. Avise o professor imediatamente.");
+      }
   };
 
   const handleSubmit = () => {
