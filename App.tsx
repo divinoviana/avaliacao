@@ -11,11 +11,27 @@ function App() {
   const [examConfig, setExamConfig] = useState<ExamConfig | null>(null);
   const [isTeacherMode, setIsTeacherMode] = useState(false);
   const [initDone, setInitDone] = useState(false);
+  const [showOfflineButton, setShowOfflineButton] = useState(false);
 
   useEffect(() => {
-    // Ensure default admin exists on app load
-    initializeAuth().then(() => setInitDone(true));
+    // Safety timer: se a inicialização demorar mais de 3s, mostra botão de forçar
+    const timer = setTimeout(() => {
+      if (!initDone) setShowOfflineButton(true);
+    }, 3000);
+
+    initializeAuth()
+      .then(() => setInitDone(true))
+      .catch((e) => {
+        console.error("Erro fatal na inicialização:", e);
+        setInitDone(true); // Prossegue mesmo com erro (modo offline)
+      })
+      .finally(() => clearTimeout(timer));
   }, []);
+
+  const handleForceOffline = () => {
+    console.warn("Usuário forçou entrada em modo offline.");
+    setInitDone(true);
+  };
 
   const handleStart = (config: ExamConfig) => {
     setExamConfig(config);
@@ -27,8 +43,25 @@ function App() {
 
   if (!initDone) {
       return (
-          <div className="flex h-screen items-center justify-center bg-slate-100">
-              <div className="text-indigo-900 font-bold animate-pulse">Conectando ao Sistema Escolar...</div>
+          <div className="flex flex-col gap-6 h-screen items-center justify-center bg-slate-100 p-4 text-center">
+              <div className="text-indigo-900 font-bold animate-pulse text-lg">Conectando ao Sistema Escolar...</div>
+              
+              {showOfflineButton && (
+                <div className="flex flex-col items-center gap-2 animate-fade-in">
+                   <p className="text-slate-500 text-sm max-w-xs">
+                     O servidor do banco de dados está demorando para responder.
+                   </p>
+                   <button 
+                     onClick={handleForceOffline}
+                     className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 py-2 rounded font-medium text-sm transition"
+                   >
+                     Entrar em Modo Offline
+                   </button>
+                   <p className="text-xs text-slate-400 mt-2">
+                     Seus dados serão salvos apenas neste computador.
+                   </p>
+                </div>
+              )}
           </div>
       );
   }

@@ -8,63 +8,92 @@ const CONFIG_KEY = 'veritas_configs';
 const USERS_KEY = 'veritas_users';
 
 // --- CIRCUIT BREAKER ---
-// Se o Firebase falhar uma vez (ex: banco não criado), mudamos para false e usamos só LocalStorage
+// Se o Firebase falhar uma vez, mudamos para false e usamos só LocalStorage
 let isCloudAvailable = true;
 
 const handleCloudError = (e: any) => {
-  console.warn("Falha na conexão com Firebase. Mudando para modo Offline (LocalStorage).", e.message);
-  isCloudAvailable = false;
+  const msg = e?.message || '';
+  console.warn("Erro no Firebase. Mudando para Offline.", msg);
+  
+  // Se o erro for especificamente "não encontrado", desligamos permanentemente para esta sessão
+  if (msg.includes("not-found") || msg.includes("does not exist") || msg.includes("Service firestore is not available")) {
+    isCloudAvailable = false;
+  } else {
+    // Outros erros de rede podem ser temporários, mas por segurança, desligamos para evitar lag
+    isCloudAvailable = false;
+  }
 };
 
 // Check Status Helper
-export const isSystemOffline = () => !isCloudAvailable;
+export const isSystemOffline = () => !isCloudAvailable || !db;
 
 export const retryCloudConnection = async (): Promise<{success: boolean; error?: string}> => {
+  if (!db) {
+    return { success: false, error: "Serviço Firebase não foi carregado corretamente (Erro fatal de script)." };
+  }
   try {
-    // Tenta uma operação leve para testar
     isCloudAvailable = true; // Reset flag to try again
     await getDocs(collection(db, 'users'));
     return { success: true };
   } catch (e: any) {
     isCloudAvailable = false;
-    return { success: false, error: e.message || 'Erro desconhecido' };
+    let errorMsg = e.message || 'Erro desconhecido';
+    if (errorMsg.includes('does not exist')) {
+        errorMsg = "Banco de Dados não encontrado (Database ID mismatch ou não criado).";
+    }
+    return { success: false, error: errorMsg };
   }
 };
 
 // --- INITIALIZATION ---
 
 export const initializeAuth = async () => {
-  // Define um tempo máximo de espera para o Firebase (3 segundos)
-  // Se demorar mais que isso, assumimos modo offline para não travar o app
-  const TIMEOUT_MS = 3000;
+  // Se db for null (falha no firebaseConfig), nem tenta conectar
+  if (!db) {
+    console.warn("Firebase DB instance is null. Running in strict Offline Mode.");
+    isCloudAvailable = false;
+    
+    // Create admin user locally just in case
+    const users = await getUsers();
+    if (users.length === 0) {
+       await saveUser({
+        username: 'diretor',
+        password: 'Matuto@84', 
+        name: 'Diretor Geral',
+        role: 'DIRECTOR'
+      });
+    }
+    return;
+  }
+
+  // Reduzido para 2 segundos para liberar o usuário mais rápido
+  const TIMEOUT_MS = 2000;
 
   const performInitialCheck = async () => {
-      if (!isCloudAvailable) return;
-      // Probe connection
-      const p = getDocs(collection(db, 'users'));
+      // Tenta conectar. Se falhar aqui (rejeição da promise), vai pro catch
+      if (!db) throw new Error("DB not initialized");
+      const p = await getDocs(collection(db, 'users'));
       return p;
   };
 
   try {
-    if (isCloudAvailable) {
-        const timeout = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Connection Timeout")), TIMEOUT_MS)
-        );
+    // 1. Tenta conectar na nuvem com timeout
+    const timeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Connection Timeout")), TIMEOUT_MS)
+    );
 
-        try {
-            // Corrida: Quem terminar primeiro ganha (Conexão ou Timeout)
-            await Promise.race([performInitialCheck(), timeout]);
-            console.log("Firebase conectado com sucesso.");
-        } catch (e) {
-            console.warn("Inicialização do Firebase demorou muito ou falhou. Entrando em modo Offline.");
-            isCloudAvailable = false;
-        }
+    try {
+        await Promise.race([performInitialCheck(), timeout]);
+        console.log("Firebase conectado com sucesso.");
+        isCloudAvailable = true;
+    } catch (e: any) {
+        console.warn("Falha ou demora na conexão com nuvem:", e.message);
+        isCloudAvailable = false;
     }
 
-    // Agora busca usuários (da nuvem se deu certo, ou local se falhou)
+    // 2. Garante a existência do usuário admin (seja na nuvem ou local)
     const users = await getUsers();
     
-    // Se não houver usuários, cria o admin padrão
     if (users.length === 0) {
       const adminUser: User = {
         username: 'diretor',
@@ -72,53 +101,53 @@ export const initializeAuth = async () => {
         name: 'Diretor Geral',
         role: 'DIRECTOR'
       };
+      // Força salvar onde estiver disponível
       await saveUser(adminUser);
       console.log("Usuário Admin inicializado.");
     }
   } catch (e) {
-    console.error("Auth init failed", e);
+    console.error("Erro crítico no initializeAuth (não deve bloquear o app)", e);
   }
 };
 
 // --- USER MANAGEMENT ---
 
 export const getUsers = async (): Promise<User[]> => {
-  // Tenta Cloud primeiro
-  if (isCloudAvailable) {
+  if (isCloudAvailable && db) {
     try {
       const querySnapshot = await getDocs(collection(db, 'users'));
       return querySnapshot.docs.map(doc => doc.data() as User);
     } catch (e) {
       handleCloudError(e);
-      // Fallback imediato para LocalStorage abaixo
+      // Fallback
     }
   }
 
-  // LocalStorage Fallback
   const data = localStorage.getItem(USERS_KEY);
   return data ? JSON.parse(data) : [];
 };
 
 export const saveUser = async (user: User) => {
-  // Verifica duplicidade (lógica agnóstica de fonte)
+  // Check duplicates locally first to be fast
   const users = await getUsers();
   if (users.find(u => u.username === user.username)) {
-    throw new Error("Nome de usuário já existe.");
+    return; 
   }
 
-  if (isCloudAvailable) {
+  if (isCloudAvailable && db) {
     try {
       await setDoc(doc(db, 'users', user.username), user);
-      return; // Sucesso na nuvem
+      return;
     } catch (e) {
       handleCloudError(e);
     }
   }
 
-  // LocalStorage
   const localUsers = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-  localUsers.push(user);
-  localStorage.setItem(USERS_KEY, JSON.stringify(localUsers));
+  if (!localUsers.find((u: User) => u.username === user.username)) {
+      localUsers.push(user);
+      localStorage.setItem(USERS_KEY, JSON.stringify(localUsers));
+  }
 };
 
 export const updateUserPassword = async (username: string, currentPass: string, newPass: string) => {
@@ -128,7 +157,7 @@ export const updateUserPassword = async (username: string, currentPass: string, 
   if (!user) throw new Error("Usuário não encontrado.");
   if (user.password !== currentPass) throw new Error("A senha atual está incorreta.");
 
-  if (isCloudAvailable) {
+  if (isCloudAvailable && db) {
     try {
       await updateDoc(doc(db, 'users', username), { password: newPass });
       return;
@@ -137,7 +166,6 @@ export const updateUserPassword = async (username: string, currentPass: string, 
     }
   }
 
-  // LocalStorage Update
   const localUsers: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
   const index = localUsers.findIndex(u => u.username === username);
   if (index !== -1) {
@@ -155,7 +183,7 @@ export const deleteUser = async (username: string) => {
     if (directors.length <= 1) throw new Error("Não é possível remover o último Diretor.");
   }
 
-  if (isCloudAvailable) {
+  if (isCloudAvailable && db) {
     try {
       await deleteDoc(doc(db, 'users', username));
       return;
@@ -164,17 +192,12 @@ export const deleteUser = async (username: string) => {
     }
   }
 
-  // LocalStorage Delete
   let localUsers: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
   localUsers = localUsers.filter(u => u.username !== username);
   localStorage.setItem(USERS_KEY, JSON.stringify(localUsers));
 };
 
 export const authenticateUser = async (username: string, password: string): Promise<User | null> => {
-  // Garante que a auth foi inicializada (cria admin se necessário) antes de checar
-  // Nota: initializeAuth agora é segura contra timeouts
-  await initializeAuth(); 
-  
   const users = await getUsers();
   const user = users.find(u => u.username === username && u.password === password);
   return user || null;
@@ -185,7 +208,7 @@ export const authenticateUser = async (username: string, password: string): Prom
 export const saveTeacherConfig = async (config: TeacherConfig) => {
   const docId = `${config.subject}-${config.bimester}`.replace(/\s+/g, '_');
   
-  if (isCloudAvailable) {
+  if (isCloudAvailable && db) {
     try {
       await setDoc(doc(db, 'configs', docId), config);
       return;
@@ -194,16 +217,14 @@ export const saveTeacherConfig = async (config: TeacherConfig) => {
     }
   }
 
-  // LocalStorage
   const configs = JSON.parse(localStorage.getItem(CONFIG_KEY) || '[]');
-  // Remove existing config for this subject/bimester to overwrite
   const filtered = configs.filter((c: TeacherConfig) => !(c.subject === config.subject && c.bimester === config.bimester));
   filtered.push(config);
   localStorage.setItem(CONFIG_KEY, JSON.stringify(filtered));
 };
 
 export const getTeacherConfigs = async (): Promise<TeacherConfig[]> => {
-  if (isCloudAvailable) {
+  if (isCloudAvailable && db) {
     try {
       const sn = await getDocs(collection(db, 'configs'));
       return sn.docs.map(d => d.data() as TeacherConfig);
@@ -224,7 +245,7 @@ export const getSpecificConfig = async (subject: Subject, bimester: Bimester): P
 // --- RESULTS MANAGEMENT ---
 
 export const saveStudentResult = async (result: StudentResult) => {
-  if (isCloudAvailable) {
+  if (isCloudAvailable && db) {
     try {
       await addDoc(collection(db, 'results'), result);
       return;
@@ -239,7 +260,7 @@ export const saveStudentResult = async (result: StudentResult) => {
 };
 
 export const getStudentResults = async (): Promise<StudentResult[]> => {
-  if (isCloudAvailable) {
+  if (isCloudAvailable && db) {
     try {
       const sn = await getDocs(collection(db, 'results'));
       return sn.docs.map(d => d.data() as StudentResult);
@@ -264,7 +285,7 @@ export const exportDatabase = async (): Promise<string> => {
     configs,
     results,
     timestamp: new Date().toISOString(),
-    source: isCloudAvailable ? 'firebase_cloud' : 'local_storage'
+    source: (isCloudAvailable && db) ? 'firebase_cloud' : 'local_storage'
   };
   return JSON.stringify(data, null, 2);
 };
@@ -272,10 +293,9 @@ export const exportDatabase = async (): Promise<string> => {
 export const importDatabase = async (jsonString: string) => {
   try {
     const data = JSON.parse(jsonString);
-    
     if (data.users) {
       for (const u of data.users) {
-        try { await saveUser(u); } catch (e) {} 
+         try { await saveUser(u); } catch {}
       }
     }
     if (data.configs) {

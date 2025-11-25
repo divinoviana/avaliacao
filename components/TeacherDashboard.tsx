@@ -267,10 +267,6 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
               </button>
            </form>
            
-           <div className="mt-6 pt-4 border-t border-slate-100 text-center">
-             <p className="text-xs text-slate-400">Primeiro acesso? Use <strong>diretor</strong> / <strong>Matuto@84</strong></p>
-           </div>
-           
            <button onClick={onBack} className="mt-4 text-sm text-indigo-600 hover:text-indigo-800 w-full text-center">
              ← Voltar para Área do Aluno
            </button>
