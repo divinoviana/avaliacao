@@ -19,14 +19,51 @@ const handleCloudError = (e: any) => {
 // Check Status Helper
 export const isSystemOffline = () => !isCloudAvailable;
 
+export const retryCloudConnection = async (): Promise<{success: boolean; error?: string}> => {
+  try {
+    // Tenta uma operação leve para testar
+    isCloudAvailable = true; // Reset flag to try again
+    await getDocs(collection(db, 'users'));
+    return { success: true };
+  } catch (e: any) {
+    isCloudAvailable = false;
+    return { success: false, error: e.message || 'Erro desconhecido' };
+  }
+};
+
 // --- INITIALIZATION ---
 
 export const initializeAuth = async () => {
+  // Define um tempo máximo de espera para o Firebase (3 segundos)
+  // Se demorar mais que isso, assumimos modo offline para não travar o app
+  const TIMEOUT_MS = 3000;
+
+  const performInitialCheck = async () => {
+      if (!isCloudAvailable) return;
+      // Probe connection
+      const p = getDocs(collection(db, 'users'));
+      return p;
+  };
+
   try {
-    // Tenta uma leitura simples para testar a conexão logo no início
-    await getUsers();
-    
+    if (isCloudAvailable) {
+        const timeout = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Connection Timeout")), TIMEOUT_MS)
+        );
+
+        try {
+            // Corrida: Quem terminar primeiro ganha (Conexão ou Timeout)
+            await Promise.race([performInitialCheck(), timeout]);
+            console.log("Firebase conectado com sucesso.");
+        } catch (e) {
+            console.warn("Inicialização do Firebase demorou muito ou falhou. Entrando em modo Offline.");
+            isCloudAvailable = false;
+        }
+    }
+
+    // Agora busca usuários (da nuvem se deu certo, ou local se falhou)
     const users = await getUsers();
+    
     // Se não houver usuários, cria o admin padrão
     if (users.length === 0) {
       const adminUser: User = {
@@ -36,7 +73,7 @@ export const initializeAuth = async () => {
         role: 'DIRECTOR'
       };
       await saveUser(adminUser);
-      console.log("Admin user initialized");
+      console.log("Usuário Admin inicializado.");
     }
   } catch (e) {
     console.error("Auth init failed", e);
@@ -135,6 +172,7 @@ export const deleteUser = async (username: string) => {
 
 export const authenticateUser = async (username: string, password: string): Promise<User | null> => {
   // Garante que a auth foi inicializada (cria admin se necessário) antes de checar
+  // Nota: initializeAuth agora é segura contra timeouts
   await initializeAuth(); 
   
   const users = await getUsers();
@@ -214,7 +252,7 @@ export const getStudentResults = async (): Promise<StudentResult[]> => {
   return data ? JSON.parse(data) : [];
 };
 
-// --- BACKUP SYSTEM (Uses whatever abstraction provides the data) ---
+// --- BACKUP SYSTEM ---
 
 export const exportDatabase = async (): Promise<string> => {
   const users = await getUsers();
@@ -235,12 +273,8 @@ export const importDatabase = async (jsonString: string) => {
   try {
     const data = JSON.parse(jsonString);
     
-    // We import into whatever system is active (Cloud or Local)
-    // Note: This might take time if cloud is active due to multiple await calls
-    
     if (data.users) {
       for (const u of data.users) {
-        // Avoid overwriting admin if it exists, logic handled in saveUser check
         try { await saveUser(u); } catch (e) {} 
       }
     }

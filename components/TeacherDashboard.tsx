@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { authenticateUser, saveTeacherConfig, getStudentResults, getTeacherConfigs, getUsers, saveUser, deleteUser, updateUserPassword, exportDatabase, importDatabase, isSystemOffline } from '../services/storageService';
+import { authenticateUser, saveTeacherConfig, getStudentResults, getTeacherConfigs, getUsers, saveUser, deleteUser, updateUserPassword, exportDatabase, importDatabase, isSystemOffline, retryCloudConnection } from '../services/storageService';
 import { Subject, Bimester, StudentResult, User, UserRole } from '../types';
 
 interface Props {
@@ -15,6 +15,7 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
   const [authError, setAuthError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [connectionErrorDetail, setConnectionErrorDetail] = useState('');
 
   // Dashboard Tab State
   const [activeTab, setActiveTab] = useState<'config' | 'results' | 'users' | 'profile'>('config');
@@ -77,7 +78,6 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
                 console.error("Failed to load dashboard data", err);
             } finally {
                 setIsLoading(false);
-                // Recheck offline status after operations
                 setIsOffline(isSystemOffline());
             }
         };
@@ -97,10 +97,27 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
           setAuthError("Usuário ou senha incorretos.");
         }
     } catch (e) {
-        setAuthError("Erro na conexão com servidor.");
+        setAuthError("Erro na conexão com servidor. Tente novamente.");
     } finally {
         setIsLoading(false);
     }
+  };
+
+  const handleRetryConnection = async () => {
+    setIsLoading(true);
+    setConnectionErrorDetail('');
+    const result = await retryCloudConnection();
+    if (result.success) {
+      setIsOffline(false);
+      alert("Conexão restabelecida com sucesso!");
+      // Reload data
+      const allResults = await getStudentResults();
+      setResults(allResults);
+    } else {
+      setIsOffline(true);
+      setConnectionErrorDetail(result.error || 'Erro desconhecido');
+    }
+    setIsLoading(false);
   };
 
   const handleSaveConfig = async () => {
@@ -313,15 +330,28 @@ export const TeacherDashboard: React.FC<Props> = ({ onBack }) => {
         {isLoading && <p className="text-center text-indigo-600 mb-4 animate-pulse">Sincronizando com a nuvem...</p>}
         
         {isOffline && (
-            <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-lg flex items-start gap-3">
-               <svg className="w-5 h-5 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-               <div>
-                 <p className="text-sm font-bold text-amber-800">Modo Offline Ativado</p>
-                 <p className="text-xs text-amber-700 mt-1">
-                   Não foi possível conectar ao banco de dados do Google. Os dados estão sendo salvos apenas <strong>neste computador</strong>. 
-                   Para corrigir, acesse o Console do Firebase e crie o Firestore Database.
-                 </p>
+            <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-lg flex flex-col md:flex-row items-start gap-4">
+               <div className="flex items-start gap-3">
+                  <svg className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                  <div>
+                    <p className="text-sm font-bold text-amber-800">Modo Offline Ativado</p>
+                    <p className="text-xs text-amber-700 mt-1">
+                      Não foi possível conectar ao banco de dados do Google. Os dados estão sendo salvos apenas <strong>neste computador</strong>. 
+                      Isso pode ocorrer se o Project ID estiver errado ou o banco não tiver sido criado no console do Firebase.
+                    </p>
+                    {connectionErrorDetail && (
+                       <div className="mt-2 p-2 bg-amber-100 rounded text-xs font-mono text-red-700">
+                          Erro: {connectionErrorDetail}
+                       </div>
+                    )}
+                  </div>
                </div>
+               <button 
+                  onClick={handleRetryConnection}
+                  className="whitespace-nowrap bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-4 py-2 rounded shadow-sm"
+               >
+                  Tentar Reconectar
+               </button>
             </div>
         )}
 
