@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ExamConfig, Question, ExamStatus, ViolationLog } from '../types';
 import { generateWrittenExamQuestions } from '../services/geminiService';
@@ -57,7 +56,7 @@ export const WrittenExam: React.FC<Props> = ({ config, onFinish }) => {
       })
       .catch((e) => {
         console.error(e);
-        alert("Falha ao gerar a prova. Verifique a conexão.");
+        alert(`Falha ao gerar a prova: ${e.message || "Erro desconhecido"}. Verifique a conexão ou tente novamente.`);
         onFinish();
       });
   }, [config, onFinish]);
@@ -156,8 +155,9 @@ export const WrittenExam: React.FC<Props> = ({ config, onFinish }) => {
     return (
       <div className="flex flex-col items-center justify-center h-96">
         <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-indigo-600 mb-4"></div>
-        <p className="text-slate-600 font-medium">O Sistema está embaralhando as questões...</p>
-        <p className="text-slate-400 text-sm mt-2">ID Único da Sessão: {Math.random().toString(36).substr(2, 9).toUpperCase()}</p>
+        <p className="text-slate-600 font-medium">O Sistema está gerando questões inéditas com IA...</p>
+        <p className="text-slate-400 text-sm mt-2">Isso pode levar alguns segundos.</p>
+        <p className="text-slate-400 text-xs mt-2 font-mono">ID Sessão: {Math.random().toString(36).substr(2, 9).toUpperCase()}</p>
       </div>
     );
   }

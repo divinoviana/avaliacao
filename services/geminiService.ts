@@ -7,7 +7,12 @@ export const generateWrittenExamQuestions = async (
   difficulty: string,
   topics?: string
 ): Promise<Question[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("Chave de API não configurada (API_KEY missing).");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   
   const contentFocus = topics 
     ? `Foque EXCLUSIVAMENTE nestes tópicos definidos pelo professor: "${topics}".` 
@@ -26,7 +31,7 @@ export const generateWrittenExamQuestions = async (
     3. Forneça 5 alternativas (A, B, C, D, E).
     4. Indique o índice da resposta correta (0 a 4).
 
-    Retorne APENAS o JSON.
+    Retorne APENAS o JSON puro, sem formatação markdown.
   `;
 
   const schema: Schema = {
@@ -39,7 +44,7 @@ export const generateWrittenExamQuestions = async (
           type: Type.STRING, 
           description: "O texto completo: Texto Base + Enunciado da Pergunta." 
         },
-        type: { type: Type.STRING, enum: ['multiple_choice'] },
+        type: { type: Type.STRING }, // Removed enum constraint to be more flexible
         options: {
           type: Type.ARRAY,
           items: { type: Type.STRING },
@@ -69,12 +74,16 @@ export const generateWrittenExamQuestions = async (
       }
     });
 
-    const text = response.text;
-    if (!text) return [];
+    let text = response.text;
+    if (!text) throw new Error("A IA retornou uma resposta vazia.");
+
+    // Sanitization: Remove markdown code blocks if present (common issue)
+    text = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "");
+
     return JSON.parse(text) as Question[];
-  } catch (error) {
-    console.error("Failed to generate questions", error);
-    throw error;
+  } catch (error: any) {
+    console.error("Failed to generate questions:", error);
+    throw new Error(`Erro na geração da prova: ${error.message || 'Falha desconhecida'}`);
   }
 };
 
