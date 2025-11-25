@@ -1,5 +1,12 @@
+
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getFirestore, Firestore, initializeFirestore } from 'firebase/firestore';
+import { 
+  getFirestore, 
+  Firestore, 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager 
+} from 'firebase/firestore';
 
 // Configuração atualizada com o novo Project ID
 const firebaseConfig = {
@@ -20,10 +27,15 @@ try {
   
   if (app) {
     try {
-      // Usa initializeFirestore para garantir a configuração correta do serviço
-      // Isso evita o erro "Service firestore is not available" em alguns ambientes
-      db = initializeFirestore(app, {}); 
-      console.log("Firestore initialized successfully with Project ID:", firebaseConfig.projectId);
+      // ATIVAÇÃO DO CACHE PERSISTENTE
+      // Isso permite que o app funcione offline e sincronize em background,
+      // eliminando a sensação de lentidão em redes instáveis.
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager()
+        })
+      }); 
+      console.log("Firestore initialized successfully with Persistence enabled (Project ID:", firebaseConfig.projectId + ")");
     } catch (fsError: any) {
       // Se falhar porque já foi inicializado (failed-precondition), tentamos pegar a instância existente
       if (fsError.code === 'failed-precondition') {
